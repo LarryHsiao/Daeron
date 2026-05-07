@@ -135,7 +135,7 @@ public sealed partial class ConfigWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Watcher start failed: {ex.Message}";
+            SetStatus($"Watcher start failed: {ex.Message}");
         }
     }
 
@@ -207,7 +207,7 @@ public sealed partial class ConfigWindow : Window
         {
             DeviceList.IsEnabled = false;
             DeviceList.PlaceholderText = "Pair a phone over Bluetooth, then it will appear here.";
-            if (activeConnection == null) StatusText.Text = "No paired audio sources.";
+            if (activeConnection == null) SetStatus("No paired audio sources.");
         }
         else
         {
@@ -225,10 +225,11 @@ public sealed partial class ConfigWindow : Window
 
                 if (StatusText.Text == "No paired audio sources." || string.IsNullOrEmpty(StatusText.Text))
                 {
-                    StatusText.Text = "Idle";
+                    SetStatus("Idle");
                 }
             }
         }
+        NotifyConnectionMenu();
     }
 
     private async void TryAutoConnect()
@@ -261,6 +262,26 @@ public sealed partial class ConfigWindow : Window
             config.DeviceId = device.Id;
             ConfigStore.Save(config);
         }
+        NotifyConnectionMenu();
+    }
+
+    private string? GetTargetDeviceName()
+    {
+        if (activeConnection != null) return activeDeviceName;
+        if (DeviceList.SelectedItem is DeviceInformation selected) return selected.Name;
+        if (!string.IsNullOrEmpty(config.DeviceId))
+        {
+            var saved = devices.FirstOrDefault(d => d.Id == config.DeviceId);
+            if (saved != null) return saved.Name;
+        }
+        return null;
+    }
+
+    private void NotifyConnectionMenu()
+    {
+        bool connected = activeConnection != null;
+        var name = GetTargetDeviceName();
+        (Application.Current as App)?.UpdateConnectionMenu(connected, name);
     }
 
     private void AutoReconnectToggle_Changed(object sender, RoutedEventArgs e)
@@ -292,7 +313,7 @@ public sealed partial class ConfigWindow : Window
                     StartWithWindowsToggle.IsChecked = false;
                     StartWithWindowsToggle.Checked += StartWithWindowsToggle_Changed;
                     StartWithWindowsToggle.Unchecked += StartWithWindowsToggle_Changed;
-                    StatusText.Text = $"Start with Windows: {result}";
+                    SetStatus($"Start with Windows: {result}");
                     requested = false;
                 }
             }
@@ -306,7 +327,7 @@ public sealed partial class ConfigWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"StartupTask failed: {ex.Message}";
+            SetStatus($"StartupTask failed: {ex.Message}");
             Log($"StartupTask failed: {ex}");
         }
     }
@@ -322,53 +343,97 @@ public sealed partial class ConfigWindow : Window
         await ConnectAsync(device);
     }
 
+    public async void TriggerConnectOrDisconnect()
+    {
+        if (activeConnection != null)
+        {
+            Disconnect();
+            return;
+        }
+        // Prefer the dropdown selection; fall back to the saved DeviceId.
+        DeviceInformation? device = DeviceList.SelectedItem as DeviceInformation;
+        if (device == null && !string.IsNullOrEmpty(config.DeviceId))
+        {
+            device = devices.FirstOrDefault(d => d.Id == config.DeviceId);
+        }
+        if (device == null)
+        {
+            Log("TriggerConnectOrDisconnect: no device available");
+            SetStatus("No device to connect to. Open settings and pick one.");
+            return;
+        }
+        await ConnectAsync(device);
+    }
+
     private async Task ConnectAsync(DeviceInformation device)
     {
         Log($"ConnectAsync: device={device.Name} id={device.Id}");
-        ConnectButton.IsEnabled = false;
-        StatusText.Text = $"Opening {device.Name}…";
+        dispatcher.TryEnqueue(() =>
+        {
+            ConnectButton.IsEnabled = false;
+            SetStatus($"Opening {device.Name}…");
+        });
 
         AudioPlaybackConnection? conn = null;
         try
         {
             conn = AudioPlaybackConnection.TryCreateFromId(device.Id);
+            Log($"TryCreateFromId returned {(conn == null ? "null" : "connection")}");
             if (conn == null)
             {
-                StatusText.Text = "Could not create connection for this device.";
-                ConnectButton.IsEnabled = true;
+                dispatcher.TryEnqueue(() =>
+                {
+                    SetStatus("Could not create connection for this device.");
+                    ConnectButton.IsEnabled = true;
+                });
                 return;
             }
 
             conn.StateChanged += OnConnectionStateChanged;
             await conn.StartAsync();
+            Log($"StartAsync complete; state={conn.State}");
             var openResult = await conn.OpenAsync();
             Log($"OpenAsync returned status={openResult.Status}; state={conn.State}");
 
             if (openResult.Status != AudioPlaybackConnectionOpenResultStatus.Success)
             {
-                StatusText.Text = $"Open failed: {openResult.Status}";
                 conn.StateChanged -= OnConnectionStateChanged;
                 conn.Dispose();
-                ConnectButton.IsEnabled = true;
+                dispatcher.TryEnqueue(() =>
+                {
+                    SetStatus($"Open failed: {openResult.Status}");
+                    ConnectButton.IsEnabled = true;
+                });
                 return;
             }
 
-            activeConnection = conn;
-            activeDeviceName = device.Name;
-            DeviceList.IsEnabled = false;
-            ConnectButton.Content = "Disconnect";
-            ConnectButton.IsEnabled = true;
-            UpdateStatusFromState(conn.State, activeDeviceName);
+            var capturedConn = conn;
+            var capturedName = device.Name;
+            dispatcher.TryEnqueue(() =>
+            {
+                activeConnection = capturedConn;
+                activeDeviceName = capturedName;
+                DeviceList.IsEnabled = false;
+                ConnectButton.Content = "Disconnect";
+                ConnectButton.IsEnabled = true;
+                UpdateStatusFromState(capturedConn.State, activeDeviceName);
+                NotifyConnectionMenu();
+                Log("ConnectAsync: UI updated to connected state");
+            });
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Connect failed: {ex.Message}";
+            Log($"ConnectAsync threw: {ex}");
             if (conn != null)
             {
                 conn.StateChanged -= OnConnectionStateChanged;
                 conn.Dispose();
             }
-            ConnectButton.IsEnabled = true;
+            dispatcher.TryEnqueue(() =>
+            {
+                SetStatus($"Connect failed: {ex.Message}");
+                ConnectButton.IsEnabled = true;
+            });
         }
     }
 
@@ -378,7 +443,8 @@ public sealed partial class ConfigWindow : Window
         ConnectButton.Content = "Connect";
         DeviceList.IsEnabled = devices.Count > 0;
         ConnectButton.IsEnabled = DeviceList.SelectedItem is DeviceInformation;
-        StatusText.Text = "Idle";
+        SetStatus("Idle");
+        NotifyConnectionMenu();
     }
 
     private void DisposeConnection()
@@ -407,7 +473,7 @@ public sealed partial class ConfigWindow : Window
 
     private void UpdateStatusFromState(AudioPlaybackConnectionState state, string deviceName)
     {
-        StatusText.Text = state switch
+        var text = state switch
         {
             AudioPlaybackConnectionState.Closed => autoReconnect
                 ? $"Waiting for {deviceName} to return…"
@@ -415,5 +481,12 @@ public sealed partial class ConfigWindow : Window
             AudioPlaybackConnectionState.Opened => $"Streaming from {deviceName}",
             _ => $"State: {state}",
         };
+        SetStatus(text);
+    }
+
+    private void SetStatus(string text)
+    {
+        StatusText.Text = text;
+        (Application.Current as App)?.UpdateTrayStatus(text);
     }
 }

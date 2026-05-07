@@ -16,7 +16,32 @@ public partial class App : Application
         "startup.log");
 
     private TaskbarIcon? trayIcon;
+    private MenuFlyoutItem? connectMenuItem;
     private ConfigWindow? configWindow;
+
+    public void UpdateTrayStatus(string status)
+    {
+        Log($"UpdateTrayStatus: '{status}' (trayIcon={(trayIcon == null ? "null" : "set")})");
+        if (trayIcon == null) return;
+        trayIcon.ToolTipText = string.IsNullOrEmpty(status) ? "Daeron" : $"Daeron — {status}";
+    }
+
+    public void UpdateConnectionMenu(bool isConnected, string? deviceName)
+    {
+        if (connectMenuItem == null) return;
+        if (isConnected)
+        {
+            connectMenuItem.Text = string.IsNullOrEmpty(deviceName)
+                ? "Disconnect"
+                : $"Disconnect from {deviceName}";
+        }
+        else
+        {
+            connectMenuItem.Text = string.IsNullOrEmpty(deviceName)
+                ? "Connect"
+                : $"Connect to {deviceName}";
+        }
+    }
 
     public App()
     {
@@ -72,6 +97,16 @@ public partial class App : Application
     {
         var iconUri = new Uri("ms-appx:///Assets/tray.ico");
 
+        connectMenuItem = new MenuFlyoutItem
+        {
+            Text = "Connect",
+            Command = new RelayCommand(() =>
+            {
+                Log("Tray menu: Connect/Disconnect invoked");
+                configWindow?.TriggerConnectOrDisconnect();
+            }),
+        };
+
         var openItem = new MenuFlyoutItem
         {
             Text = "Open settings…",
@@ -93,6 +128,8 @@ public partial class App : Application
         };
 
         var menu = new MenuFlyout();
+        menu.Items.Add(connectMenuItem);
+        menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(openItem);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(exitItem);
@@ -132,7 +169,6 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log($"ShowConfigWindow failed: {ex}");
-            // Reset and try once more.
             configWindow = null;
             try
             {
@@ -168,6 +204,7 @@ public partial class App : Application
         Log("ExitApp: disposing tray and exiting");
         trayIcon?.Dispose();
         trayIcon = null;
+        connectMenuItem = null;
         if (configWindow != null)
         {
             configWindow.AppWindow.Closing -= OnConfigWindowClosing;

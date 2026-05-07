@@ -9,7 +9,7 @@
     <Identity
         Name="Daeron"
         Publisher="CN=Daeron-Dev"
-        Version="0.1.0.6" />
+        Version="0.1.0.10" />
 
     <Properties>
         <DisplayName>Daeron</DisplayName>
