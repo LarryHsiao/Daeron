@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Daeron.ConfigWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+          Padding="24"
+          RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="8">
+            <TextBlock Text="Source device" />
+            <ComboBox x:Name="DeviceList"
+                      MinWidth="320"
+                      PlaceholderText="No paired devices yet"
+                      IsEnabled="False"
+                      DisplayMemberPath="Name"
+                      SelectionChanged="DeviceList_SelectionChanged" />
+        </StackPanel>
+
+        <Button Grid.Row="1"
+                x:Name="ConnectButton"
+                Content="Connect"
+                IsEnabled="False"
+                Click="ConnectButton_Click" />
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="Status:" />
+            <TextBlock x:Name="StatusText" Text="Idle" />
+        </StackPanel>
+
+        <Border Grid.Row="3"
+                Height="1"
+                Background="{ThemeResource ControlStrokeColorDefaultBrush}" />
+
+        <CheckBox Grid.Row="4"
+                  x:Name="StartWithWindowsToggle"
+                  Content="Start with Windows"
+                  Checked="StartWithWindowsToggle_Changed"
+                  Unchecked="StartWithWindowsToggle_Changed" />
+
+        <CheckBox Grid.Row="5"
+                  x:Name="AutoReconnectToggle"
+                  Content="Auto-reconnect when device returns"
+                  IsChecked="True"
+                  Checked="AutoReconnectToggle_Changed"
+                  Unchecked="AutoReconnectToggle_Changed" />
+    </Grid>
+</Window>

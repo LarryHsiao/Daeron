@@ -1,0 +1,41 @@
+## .NET / Visual Studio
+bin/
+obj/
+out/
+.vs/
+*.user
+*.suo
+*.userprefs
+*.userosscache
+*.sln.docstates
+
+## Build artifacts
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Bb]uild/
+[Pp]ublish/
+*.binlog
+
+## Rider
+.idea/
+
+## VS Code
+.vscode/
+
+## NuGet
+packages/
+*.nupkg
+.nuget/
+project.lock.json
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## Code-signing private keys (dev cert lives in CurrentUser\My; .cer public part stays)
+*.pfx
