@@ -39,3 +39,6 @@ desktop.ini
 
 ## Code-signing private keys (dev cert lives in CurrentUser\My; .cer public part stays)
 *.pfx
+
+## Packaged release artifacts staged for upload
+releases/
