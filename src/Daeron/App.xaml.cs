@@ -4,6 +4,7 @@ using H.NotifyIcon;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.Windows.AppLifecycle;
 
 namespace Daeron;
 
@@ -35,16 +36,35 @@ public partial class App : Application
     {
         try
         {
-            Log("OnLaunched: building tray icon");
+            bool atBoot = IsStartupTaskActivation();
+            Log($"OnLaunched: atBoot={atBoot}");
             BuildTrayIcon();
-            Log("OnLaunched: showing ConfigWindow");
-            ShowConfigWindow();
+            EnsureConfigWindow();
+            configWindow!.StartBackgroundOperations();
+            if (!atBoot)
+            {
+                configWindow.Activate();
+            }
             Log("OnLaunched: complete");
         }
         catch (Exception ex)
         {
             Log($"OnLaunched threw: {ex}");
             throw;
+        }
+    }
+
+    private static bool IsStartupTaskActivation()
+    {
+        try
+        {
+            var activation = AppInstance.GetCurrent().GetActivatedEventArgs();
+            return activation.Kind == ExtendedActivationKind.StartupTask;
+        }
+        catch (Exception ex)
+        {
+            Log($"IsStartupTaskActivation failed: {ex.Message}");
+            return false;
         }
     }
 
@@ -91,22 +111,20 @@ public partial class App : Application
         trayIcon.ForceCreate();
     }
 
+    private void EnsureConfigWindow()
+    {
+        if (configWindow != null) return;
+        configWindow = new ConfigWindow();
+        configWindow.AppWindow.Closing += OnConfigWindowClosing;
+        configWindow.Closed += OnConfigWindowClosed;
+    }
+
     private void ShowConfigWindow()
     {
         try
         {
-            if (configWindow == null)
-            {
-                Log("ShowConfigWindow: creating new ConfigWindow");
-                configWindow = new ConfigWindow();
-                configWindow.AppWindow.Closing += OnConfigWindowClosing;
-                configWindow.Closed += OnConfigWindowClosed;
-                configWindow.Activate();
-                Log("ShowConfigWindow: activated new window");
-                return;
-            }
-
-            Log("ShowConfigWindow: reusing existing ConfigWindow");
+            EnsureConfigWindow();
+            configWindow!.StartBackgroundOperations();
             configWindow.AppWindow.Show();
             configWindow.Activate();
             Log("ShowConfigWindow: shown + activated");
@@ -118,9 +136,8 @@ public partial class App : Application
             configWindow = null;
             try
             {
-                configWindow = new ConfigWindow();
-                configWindow.AppWindow.Closing += OnConfigWindowClosing;
-                configWindow.Closed += OnConfigWindowClosed;
+                EnsureConfigWindow();
+                configWindow!.StartBackgroundOperations();
                 configWindow.Activate();
                 Log("ShowConfigWindow: recovered with new window");
             }
@@ -143,8 +160,6 @@ public partial class App : Application
     private void OnConfigWindowClosed(object sender, WindowEventArgs args)
     {
         Log($"ConfigWindow: Window.Closed fired (Handled was {args.Handled})");
-        // If we reach here, the window truly closed. Drop the reference so
-        // the next ShowConfigWindow rebuilds it.
         configWindow = null;
     }
 

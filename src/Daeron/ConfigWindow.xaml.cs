@@ -102,12 +102,16 @@ public sealed partial class ConfigWindow : Window
         togglesInitialized = true;
     }
 
-    private async void OnFirstActivated(object sender, WindowActivatedEventArgs args)
+    public void StartBackgroundOperations()
     {
         if (watcherStarted) return;
         watcherStarted = true;
         StartDeviceWatcher();
-        await Task.CompletedTask;
+    }
+
+    private void OnFirstActivated(object sender, WindowActivatedEventArgs args)
+    {
+        StartBackgroundOperations();
     }
 
     private void OnClosed(object sender, WindowEventArgs args)
