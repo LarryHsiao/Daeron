@@ -53,6 +53,14 @@ public sealed partial class ConfigWindow : Window
     {
         InitializeComponent();
         Title = "Daeron";
+        try
+        {
+            AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico"));
+        }
+        catch (Exception ex)
+        {
+            Log($"SetIcon failed: {ex.Message}");
+        }
         ResizeForDpi(logicalWidth: 440, logicalHeight: 440);
         dispatcher = DispatcherQueue.GetForCurrentThread();
         DeviceList.ItemsSource = devices;
