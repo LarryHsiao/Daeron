@@ -54,6 +54,7 @@ public sealed partial class ConfigWindow : Window
     private bool autoConnectAttempted;
     private bool reconnectScheduled;
     private bool connecting;
+    private bool needsPostConnectCycle;
 
     public ConfigWindow()
     {
@@ -436,6 +437,7 @@ public sealed partial class ConfigWindow : Window
             var capturedConn = conn;
             var capturedName = device.Name;
             var capturedId = device.Id;
+            var capturedDevice = device;
             dispatcher.TryEnqueue(() =>
             {
                 activeConnection = capturedConn;
@@ -448,6 +450,38 @@ public sealed partial class ConfigWindow : Window
                 UpdateStatusFromState(capturedConn.State, activeDeviceName);
                 NotifyConnectionMenu();
                 Log("ConnectAsync: UI updated to connected state");
+
+                // After-cycle: an auto-reconnect that "succeeds" sometimes
+                // leaves the audio stack stale. Mimic a manual user re-click
+                // (disconnect → connect) to flush it — but wait first so the
+                // connection actually settles into the Opened state, the way a
+                // real user's hand-timed cycle does.
+                if (needsPostConnectCycle)
+                {
+                    needsPostConnectCycle = false;
+                    Log("ConnectAsync: scheduling post-connect cycle in 3s");
+                    var scheduledForId = capturedId;
+                    var scheduledForDevice = capturedDevice;
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(3000);
+                        dispatcher.TryEnqueue(() =>
+                        {
+                            if (activeConnection == null)
+                            {
+                                Log("Post-connect cycle aborted: no active connection");
+                                return;
+                            }
+                            if (activeDeviceId != scheduledForId)
+                            {
+                                Log("Post-connect cycle aborted: device changed");
+                                return;
+                            }
+                            Log("Running scheduled post-connect cycle");
+                            StartReconnectCycle(scheduledForDevice, requestPostConnectCycle: false);
+                        });
+                    });
+                }
             });
         }
         catch (Exception ex)
@@ -470,6 +504,7 @@ public sealed partial class ConfigWindow : Window
     {
         DisposeConnection();
         pendingReconnectId = null;
+        needsPostConnectCycle = false;
         ConnectButton.Content = "Connect";
         DeviceList.IsEnabled = devices.Count > 0;
         ConnectButton.IsEnabled = DeviceList.SelectedItem is DeviceInformation;
@@ -547,8 +582,30 @@ public sealed partial class ConfigWindow : Window
             ScheduleReconnect();
             return;
         }
-        Log($"RunScheduledReconnect: attempting {target.Name}");
-        _ = ConnectAsync(target);
+        Log($"RunScheduledReconnect: starting cycle for {target.Name}");
+        StartReconnectCycle(target, requestPostConnectCycle: true);
+    }
+
+    private void StartReconnectCycle(DeviceInformation target, bool requestPostConnectCycle)
+    {
+        // Mimic the manual workaround: run the disconnect routine first to
+        // flush any stale state, give the audio stack a brief settle, then
+        // open a fresh connection.
+        var parkedId = target.Id;
+        Disconnect();
+        pendingReconnectId = parkedId;
+        if (requestPostConnectCycle) needsPostConnectCycle = true;
+        SetStatus($"Reconnecting to {target.Name}…");
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(300);
+            dispatcher.TryEnqueue(() =>
+            {
+                if (pendingReconnectId != parkedId) return;
+                if (activeConnection != null || connecting) return;
+                _ = ConnectAsync(target);
+            });
+        });
     }
 
     private void HandleConnectFailure(DeviceInformation device, string message)
