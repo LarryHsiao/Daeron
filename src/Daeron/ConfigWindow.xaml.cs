@@ -41,6 +41,8 @@ public sealed partial class ConfigWindow : Window
     private readonly DispatcherQueue dispatcher;
     private readonly ObservableCollection<DeviceInformation> devices = new();
     private readonly Config config;
+    private const int ReconnectDelayMs = 1500;
+
     private DeviceWatcher? watcher;
     private AudioPlaybackConnection? activeConnection;
     private string activeDeviceName = "device";
@@ -50,6 +52,8 @@ public sealed partial class ConfigWindow : Window
     private bool autoReconnect;
     private bool togglesInitialized;
     private bool autoConnectAttempted;
+    private bool reconnectScheduled;
+    private bool connecting;
 
     public ConfigWindow()
     {
@@ -196,10 +200,10 @@ public sealed partial class ConfigWindow : Window
     {
         if (pendingReconnectId == null || pendingReconnectId != deviceId) return;
         if (activeConnection != null) return;
+        if (connecting) return;
         var target = devices.FirstOrDefault(d => d.Id == deviceId);
         if (target == null) return;
         Log($"Pending auto-reconnect: device {target.Name} returned — reconnecting");
-        pendingReconnectId = null;
         _ = ConnectAsync(target);
     }
 
@@ -390,6 +394,13 @@ public sealed partial class ConfigWindow : Window
 
     private async Task ConnectAsync(DeviceInformation device)
     {
+        if (connecting)
+        {
+            Log($"ConnectAsync: already in flight, skipping {device.Name}");
+            return;
+        }
+        connecting = true;
+
         Log($"ConnectAsync: device={device.Name} id={device.Id}");
         dispatcher.TryEnqueue(() =>
         {
@@ -404,11 +415,7 @@ public sealed partial class ConfigWindow : Window
             Log($"TryCreateFromId returned {(conn == null ? "null" : "connection")}");
             if (conn == null)
             {
-                dispatcher.TryEnqueue(() =>
-                {
-                    SetStatus("Could not create connection for this device.");
-                    ConnectButton.IsEnabled = true;
-                });
+                HandleConnectFailure(device, "Could not create connection for this device.");
                 return;
             }
 
@@ -422,11 +429,7 @@ public sealed partial class ConfigWindow : Window
             {
                 conn.StateChanged -= OnConnectionStateChanged;
                 conn.Dispose();
-                dispatcher.TryEnqueue(() =>
-                {
-                    SetStatus($"Open failed: {openResult.Status}");
-                    ConnectButton.IsEnabled = true;
-                });
+                HandleConnectFailure(device, $"Open failed: {openResult.Status}");
                 return;
             }
 
@@ -455,11 +458,11 @@ public sealed partial class ConfigWindow : Window
                 conn.StateChanged -= OnConnectionStateChanged;
                 conn.Dispose();
             }
-            dispatcher.TryEnqueue(() =>
-            {
-                SetStatus($"Connect failed: {ex.Message}");
-                ConnectButton.IsEnabled = true;
-            });
+            HandleConnectFailure(device, $"Connect failed: {ex.Message}");
+        }
+        finally
+        {
+            connecting = false;
         }
     }
 
@@ -503,8 +506,8 @@ public sealed partial class ConfigWindow : Window
             }
 
             // The connection is one-shot: a closed session cannot be re-opened.
-            // Dispose it, park the device id, and re-attempt as soon as the
-            // watcher surfaces the device again.
+            // Dispose, park the device id, and let the scheduled retry attempt
+            // a fresh connection once the Bluetooth stack has settled.
             var name = activeDeviceName;
             var pendingId = activeDeviceId;
             DisposeConnection();
@@ -514,17 +517,54 @@ public sealed partial class ConfigWindow : Window
             DeviceList.IsEnabled = false;
             SetStatus($"Waiting for {name} to return…");
             NotifyConnectionMenu();
+            ScheduleReconnect();
+        });
+    }
 
-            if (pendingReconnectId != null)
+    private void ScheduleReconnect()
+    {
+        if (reconnectScheduled) return;
+        reconnectScheduled = true;
+        Log($"Reconnect scheduled in {ReconnectDelayMs}ms");
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(ReconnectDelayMs);
+            dispatcher.TryEnqueue(RunScheduledReconnect);
+        });
+    }
+
+    private void RunScheduledReconnect()
+    {
+        reconnectScheduled = false;
+        if (!autoReconnect) return;
+        if (activeConnection != null) return;
+        if (connecting) return;
+        if (pendingReconnectId == null) return;
+        var target = devices.FirstOrDefault(d => d.Id == pendingReconnectId);
+        if (target == null)
+        {
+            Log("RunScheduledReconnect: device not enumerated yet, rescheduling");
+            ScheduleReconnect();
+            return;
+        }
+        Log($"RunScheduledReconnect: attempting {target.Name}");
+        _ = ConnectAsync(target);
+    }
+
+    private void HandleConnectFailure(DeviceInformation device, string message)
+    {
+        Log($"HandleConnectFailure: {message}; autoReconnect={autoReconnect}; pending={pendingReconnectId}");
+        dispatcher.TryEnqueue(() =>
+        {
+            if (autoReconnect && pendingReconnectId != null)
             {
-                var present = devices.FirstOrDefault(d => d.Id == pendingReconnectId);
-                if (present != null)
-                {
-                    Log("Closed with autoReconnect — device still enumerated, retrying immediately");
-                    pendingReconnectId = null;
-                    _ = ConnectAsync(present);
-                }
+                SetStatus($"Waiting for {device.Name} to return…");
+                ConnectButton.IsEnabled = false;
+                ScheduleReconnect();
+                return;
             }
+            SetStatus(message);
+            ConnectButton.IsEnabled = true;
         });
     }
 
