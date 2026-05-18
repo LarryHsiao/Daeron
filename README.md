@@ -18,20 +18,18 @@ Signed with a self-signed development certificate (`CN=Daeron-Dev`). End-user in
 
 ## Install (from a release)
 
-Download `daeron-setup-<version>.exe` from the GitHub release page and run it. UAC prompts once (admin is required to trust the self-signed cert in `LocalMachine\TrustedPeople`); the installer then trusts the certificate, registers the bundled Windows App Runtime 1.6 framework, and registers the Daeron MSIX. After it finishes, Daeron appears in the Start Menu and lives in the tray. The config window opens via the tray's "Open settings."
+Download `Daeron-<version>-x64.zip` from the GitHub release page and unzip it. The folder contains the `.msix`, the `.cer` it was signed with, the `Microsoft.WindowsAppRuntime.1.6` framework dependency, and the `Add-AppDevPackage.ps1` helper.
 
-Uninstall through **Apps & features** → **Daeron** → **Uninstall**, the same as any other Windows app. The WindowsAppRuntime framework is shared with other apps and is left in place.
-
-Requires Windows 10 build 19041 or later, x64.
-
-### Manual install (fallback)
-
-If you prefer to avoid running an installer, the same release also ships `Daeron-<version>-x64.zip` — the raw MSIX bundle the installer wraps. Two steps:
+Two steps:
 
 1. **Trust the certificate.** Right-click `Daeron_<version>_x64.cer` → **Install Certificate** → choose **Local Machine** → **Place all certificates in the following store** → **Trusted People**. UAC will prompt; admin is required, once per machine.
 2. **Register the package.** Right-click `Add-AppDevPackage.ps1` → **Run with PowerShell**. The helper installs the WindowsAppRuntime dependency from `Dependencies\x64\` and then registers the `.msix`.
 
 > Use **Windows PowerShell 5.1** (`powershell.exe`), not PowerShell 7 (`pwsh.exe`). The latter does not auto-load the `Appx` module, and the helper will fail with `Add-AppxPackage` reported as an unknown command.
+
+After install, Daeron appears in the Start Menu and lives in the tray. The config window opens via the tray's "Open settings."
+
+Requires Windows 10 build 19041 or later, x64.
 
 ## Build
 
@@ -58,14 +56,3 @@ The wrapper invokes VS Build Tools' MSBuild and produces a signed MSIX under `sr
 .\setup-cert.cmd       # once, with admin — trusts the dev cert in LocalMachine\TrustedPeople
 .\install.cmd          # registers the most recently built MSIX
 ```
-
-### Installer (Inno Setup)
-
-The Inno script at `installer\daeron.iss` wraps the Release MSIX, the signing cert, and the WindowsAppRuntime dependency into a single `daeron-setup-<version>.exe` for end users. Bump `MyAppVersion` in the script in lockstep with `Package.appxmanifest`, build Release first, then:
-
-```
-.\build.cmd Release x64
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\daeron.iss
-```
-
-The setup `.exe` lands in `build\installer\`. Requires Inno Setup 6.
