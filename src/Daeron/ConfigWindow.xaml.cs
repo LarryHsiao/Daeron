@@ -44,6 +44,8 @@ public sealed partial class ConfigWindow : Window
     private DeviceWatcher? watcher;
     private AudioPlaybackConnection? activeConnection;
     private string activeDeviceName = "device";
+    private string? activeDeviceId;
+    private string? pendingReconnectId;
     private bool watcherStarted;
     private bool autoReconnect;
     private bool togglesInitialized;
@@ -176,6 +178,7 @@ public sealed partial class ConfigWindow : Window
         {
             if (devices.All(d => d.Id != info.Id)) devices.Add(info);
             RefreshDropdownState();
+            TryResumePendingReconnect(info.Id);
         });
     }
 
@@ -185,7 +188,19 @@ public sealed partial class ConfigWindow : Window
         {
             var existing = devices.FirstOrDefault(d => d.Id == update.Id);
             existing?.Update(update);
+            TryResumePendingReconnect(update.Id);
         });
+    }
+
+    private void TryResumePendingReconnect(string deviceId)
+    {
+        if (pendingReconnectId == null || pendingReconnectId != deviceId) return;
+        if (activeConnection != null) return;
+        var target = devices.FirstOrDefault(d => d.Id == deviceId);
+        if (target == null) return;
+        Log($"Pending auto-reconnect: device {target.Name} returned — reconnecting");
+        pendingReconnectId = null;
+        _ = ConnectAsync(target);
     }
 
     private void OnDeviceRemoved(DeviceWatcher sender, DeviceInformationUpdate update)
@@ -417,10 +432,13 @@ public sealed partial class ConfigWindow : Window
 
             var capturedConn = conn;
             var capturedName = device.Name;
+            var capturedId = device.Id;
             dispatcher.TryEnqueue(() =>
             {
                 activeConnection = capturedConn;
                 activeDeviceName = capturedName;
+                activeDeviceId = capturedId;
+                pendingReconnectId = null;
                 DeviceList.IsEnabled = false;
                 ConnectButton.Content = "Disconnect";
                 ConnectButton.IsEnabled = true;
@@ -448,6 +466,7 @@ public sealed partial class ConfigWindow : Window
     private void Disconnect()
     {
         DisposeConnection();
+        pendingReconnectId = null;
         ConnectButton.Content = "Connect";
         DeviceList.IsEnabled = devices.Count > 0;
         ConnectButton.IsEnabled = DeviceList.SelectedItem is DeviceInformation;
@@ -461,6 +480,7 @@ public sealed partial class ConfigWindow : Window
         activeConnection.StateChanged -= OnConnectionStateChanged;
         activeConnection.Dispose();
         activeConnection = null;
+        activeDeviceId = null;
     }
 
     private void OnConnectionStateChanged(AudioPlaybackConnection sender, object args)
@@ -469,13 +489,42 @@ public sealed partial class ConfigWindow : Window
         Log($"StateChanged: state={state}; autoReconnect={autoReconnect}");
         dispatcher.TryEnqueue(() =>
         {
-            if (state == AudioPlaybackConnectionState.Closed && !autoReconnect)
+            if (state != AudioPlaybackConnectionState.Closed)
+            {
+                UpdateStatusFromState(state, activeDeviceName);
+                return;
+            }
+
+            if (!autoReconnect)
             {
                 Log("Closed with autoReconnect off — disconnecting fully");
                 Disconnect();
                 return;
             }
-            UpdateStatusFromState(state, activeDeviceName);
+
+            // The connection is one-shot: a closed session cannot be re-opened.
+            // Dispose it, park the device id, and re-attempt as soon as the
+            // watcher surfaces the device again.
+            var name = activeDeviceName;
+            var pendingId = activeDeviceId;
+            DisposeConnection();
+            pendingReconnectId = pendingId;
+            ConnectButton.Content = "Connect";
+            ConnectButton.IsEnabled = false;
+            DeviceList.IsEnabled = false;
+            SetStatus($"Waiting for {name} to return…");
+            NotifyConnectionMenu();
+
+            if (pendingReconnectId != null)
+            {
+                var present = devices.FirstOrDefault(d => d.Id == pendingReconnectId);
+                if (present != null)
+                {
+                    Log("Closed with autoReconnect — device still enumerated, retrying immediately");
+                    pendingReconnectId = null;
+                    _ = ConnectAsync(present);
+                }
+            }
         });
     }
 
