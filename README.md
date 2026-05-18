@@ -6,7 +6,7 @@ Named for Daeron, minstrel of Doriath — the greatest singer of the Eldar, and 
 
 ## Status
 
-First sideloadable build (`v0.1.0.16`). The original roadmap stands in place:
+Current build: `v0.1.1.0`. The original roadmap stands in place:
 
 1. WinUI 3 config window.
 2. Tray host — minimize-to-tray, "Open settings", "Exit", live state surfaced on the icon.
